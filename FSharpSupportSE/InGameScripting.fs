@@ -13,11 +13,18 @@ open Sandbox.Game.Screens.Terminal.Controls
 open FSharp.Compiler.SourceCodeServices
 open FSharp.Compiler.Text
 open Sandbox.Game.EntityComponents
+open VRage.Game
+open VRage.Game.ObjectBuilders.ComponentSystem
+open System.Runtime.InteropServices
+open Sandbox.Game.World
+open VRage.Game.Definitions
+open Sandbox.Definitions
 
 let fsharpModeGUID = Guid.Parse("8ee7af73-af43-40ca-b08c-0b4dc95a933b")
 
-[<Literal>]
-let fsharpMode = "__FSHARP_MODE__"
+//register guid to be able to serialize custom mod data in MyModStorageComponent
+let definition = MyDefinitionManager.Static.GetEntityComponentDefinitions<MyModStorageComponentDefinition>().[0]
+definition.RegisteredStorageGuids <- definition.RegisteredStorageGuids |> Array.append [|fsharpModeGUID|]
 
 let fn = Path.ChangeExtension(Path.GetTempFileName(), ".fs")
 
@@ -54,7 +61,7 @@ let rec isModeEnabled (block: MyProgrammableBlock ): bool =
         match block.Storage.TryGetValue(fsharpModeGUID) with
         | true, v -> v = bool.TrueString
         | false, _ -> block.Storage.Add(fsharpModeGUID, bool.FalseString); false
-    else block.Storage <- MyModStorageComponent(); isModeEnabled(block)
+    else false
 
 let mapErrors =
     Array.map <| fun (x: FSharpErrorInfo) ->
@@ -78,7 +85,7 @@ let compile assemblyName script : Result<VRage.Scripting.Message List * Assembly
       }
 
 [<HarmonyPatch(typeof<MyProgrammableBlock>, "Compile")>]
-type MyProgrammableBlockCompile =
+type CompilePatch =
     static member isModeEnabledStub(block: MyProgrammableBlock): bool = isModeEnabled block
 
     static member CompileFSharp
@@ -102,8 +109,8 @@ type MyProgrammableBlockCompile =
         seq{
             let jumpLabel = ilgenerator.DefineLabel()
             let jump2Label = ilgenerator.DefineLabel()
-            let isModeEnableInfo = typeof<MyProgrammableBlockCompile>.GetMethod "isModeEnabledStub"
-            let compileFSharpInfo = typeof<MyProgrammableBlockCompile>.GetMethod "CompileFSharp"
+            let isModeEnableInfo = typeof<CompilePatch>.GetMethod "isModeEnabledStub"
+            let compileFSharpInfo = typeof<CompilePatch>.GetMethod "CompileFSharp"
             let compileInGameScriptAsyncInfo = typeof<VRage.Scripting.IVRageScriptingFunctions>.GetMethod "CompileIngameScriptAsync"
             let mAssemblyInfo = AccessTools.Field(typeof<MyProgrammableBlock>, "m_assembly")
             let isFsharpEnabledIndex = ilgenerator.DeclareLocal(typeof<bool>).LocalIndex
@@ -129,7 +136,7 @@ type CreateInstancePatch =
         seq {
             let jumpLabel = ilgenerator.DefineLabel()
             let jump2Label = ilgenerator.DefineLabel()
-            let isModeEnableInfo = typeof<MyProgrammableBlockCompile>.GetMethod "isModeEnabledStub"
+            let isModeEnableInfo = typeof<CompilePatch>.GetMethod "isModeEnabledStub"
             for instruction in instructions do 
                 if instruction.opcode = OpCodes.Ldstr && instruction.operand = ("Program" :> obj) then
                     CodeInstruction(OpCodes.Ldarg_0)
@@ -158,12 +165,9 @@ type CreateTerminalControlsPatch =
             checkbox.Getter <- CheckboxGetter isModeEnabled
             checkbox.Enabled <- Func<MyProgrammableBlock, bool> (fun _ -> true)
             checkbox.Setter <- CheckboxSetter (fun (block) v ->
-                let rec setValue(block: MyProgrammableBlock) =
                     if block.Storage <> null then
                         match block.Storage.TryGetValue(fsharpModeGUID) with
                         | true, _ -> block.Storage.SetValue(fsharpModeGUID, v.ToString())
-                        | false, _ -> block.Storage.Add(fsharpModeGUID, v.ToString()) 
-                    else block.Storage <- MyModStorageComponent(); setValue(block)
-                setValue(block))
+                        | false, _ -> block.Storage.Add(fsharpModeGUID, v.ToString()))
             MyTerminalControlFactory.AddControl<MyProgrammableBlock>(0, checkbox)
         
