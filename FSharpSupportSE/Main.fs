@@ -12,7 +12,8 @@ open VRage.Game
 type Main() =
      interface IPlugin with
         member _.Dispose(): unit = ()
-        member _.Init(gameInstance: obj): unit = 
-            let harmony = Harmony("FSharpSupportSE")
+        member _.Init _ : unit =
+            FileLog.logPath <- "/home/timonkot13/Harmonylogs.txt"
+            let harmony = Harmony "FSharpSupportSE"
             harmony.PatchAll() 
         member _.Update() = ()

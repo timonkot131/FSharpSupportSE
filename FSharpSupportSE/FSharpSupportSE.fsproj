@@ -15,44 +15,53 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="FSharp.Compiler.Service" Version="38.0.2" />
+    <PackageReference Include="FSharp.Compiler.Service" Version="41.0.5" />
     <PackageReference Include="Lib.Harmony" Version="2.1.1" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="System.Memory" Version="4.5.4" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="Microsoft.CodeAnalysis">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Microsoft.CodeAnalysis.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Microsoft.CodeAnalysis.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.CodeAnalysis.CSharp">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
     </Reference>
     <Reference Include="Sandbox.Common">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Sandbox.Common.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Sandbox.Common.dll</HintPath>
     </Reference>
     <Reference Include="Sandbox.Game">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Sandbox.Game.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Sandbox.Game.dll</HintPath>
     </Reference>
     <Reference Include="System.Collections.Immutable">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\System.Collections.Immutable.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/System.Collections.Immutable.dll</HintPath>
     </Reference>
     <Reference Include="VRage">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/VRage.dll</HintPath>
     </Reference>
     <Reference Include="VRage.Game">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Game.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/VRage.Game.dll</HintPath>
     </Reference>
     <Reference Include="VRage.Library">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Library.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/VRage.Library.dll</HintPath>
     </Reference>
     <Reference Include="VRage.Math">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Math.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/VRage.Math.dll</HintPath>
     </Reference>
     <Reference Include="VRage.Scripting">
-      <HintPath>D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Scripting.dll</HintPath>
+      <HintPath>/home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/VRage.Scripting.dll</HintPath>
     </Reference>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="FSharp.Core" Version="5.0.0" />
+    <PackageReference Update="FSharp.Core" Version="6.0.5" />
   </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="cp /home/timonkot13/FSharpProjects/FSharpSupportSE/FSharpSupportSE/bin/Debug/net472/FSharpSupportSE.dll /home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Plugins/&#xA;&#xA;cp /home/timonkot13/FSharpProjects/FSharpSupportSE/FSharpSupportSE/bin/Debug/net472/FSharpSupportSE.pdb /home/timonkot13/.local/share/Steam/steamapps/common/SpaceEngineers/Bin64/Plugins/" />
+  </Target>
 </Project>

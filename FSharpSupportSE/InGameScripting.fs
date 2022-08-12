@@ -5,89 +5,114 @@ open System.Collections.Generic
 open System.IO
 open System.Reflection
 open System.Reflection.Emit
+open System.Runtime.CompilerServices
+open System.Text
+open FSharp.Compiler.Diagnostics
 open HarmonyLib
 open Sandbox.Game.Entities.Blocks
 open Sandbox.Game.Gui
 open Sandbox.Game.Localization
 open Sandbox.Game.Screens.Terminal.Controls
-open FSharp.Compiler.SourceCodeServices
 open FSharp.Compiler.Text
 open Sandbox.Game.EntityComponents
-open VRage.Game
-open VRage.Game.ObjectBuilders.ComponentSystem
-open System.Runtime.InteropServices
-open Sandbox.Game.World
+ 
 open VRage.Game.Definitions
 open Sandbox.Definitions
 
 let fsharpModeGUID = Guid.Parse("8ee7af73-af43-40ca-b08c-0b4dc95a933b")
 
+[<Literal>]
+let noNamespace = """script must begin with "namespace FSharpSupport" """
+
 //register guid to be able to serialize custom mod data in MyModStorageComponent
 let definition = MyDefinitionManager.Static.GetEntityComponentDefinitions<MyModStorageComponentDefinition>().[0]
 definition.RegisteredStorageGuids <- definition.RegisteredStorageGuids |> Array.append [|fsharpModeGUID|]
+ 
+let (^) f x = f x
 
-let fn = Path.ChangeExtension(Path.GetTempFileName(), ".fs")
+let log msg =
+    FileLog.Log(DateTime.Now.ToString("[HH:mm:ss] ") + msg.ToString())
 
-let dependencies =
+module Compilation =
+    open FSharp.Compiler.CodeAnalysis
+    let bin64Folder =
+        Assembly.GetExecutingAssembly().Location
+        |> Directory.GetParent
+        |> fun x -> x.Parent.FullName
+        
+    let dependencies =
         [
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Sandbox.Game.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Sandbox.Common.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Sandbox.Graphics.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\SpaceEngineers.Game.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\SpaceEngineers.ObjectBuilders.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Audio.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Game.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Input.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Library.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Math.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Render.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Render11.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\VRage.Scripting.dll"
-            "D:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64\Plugins\FSharp.Core.dll"
-        ] 
+            "Sandbox.Game.dll"
+            "Sandbox.Common.dll"
+            "Sandbox.Graphics.dll"
+            "SpaceEngineers.Game.dll"
+            "SpaceEngineers.ObjectBuilders.dll"
+            "VRage.dll"
+            "VRage.Audio.dll"
+            "VRage.Game.dll"
+            "VRage.Input.dll"
+            "VRage.Library.dll"
+            "VRage.Math.dll"
+            "VRage.Render.dll"
+            "VRage.Render11.dll"
+            "VRage.Scripting.dll"
+            "Plugins/FSharp.Core.dll"
+        ]
+        |> List.map (fun dll -> sprintf "%1s/%2s" bin64Folder dll )
+        
+    let fn = Path.ChangeExtension(Path.GetTempFileName(), ".fs")
+        
+    let config file =
+        { SourceFiles=[|file|];
+          ConditionalCompilationDefines = FSharpParsingOptions.Default.ConditionalCompilationDefines;
+          ErrorSeverityOptions = FSharpParsingOptions.Default.ErrorSeverityOptions;
+          IsInteractive=false;
+          LightSyntax= Some true;
+          CompilingFsLib= false;
+          IsExe=false
+          LangVersionText = "F# 6.0.5" } 
 
-let config file =
-    {SourceFiles=[|file|];
-     ConditionalCompilationDefines = FSharpParsingOptions.Default.ConditionalCompilationDefines;
-     ErrorSeverityOptions = FSharpParsingOptions.Default.ErrorSeverityOptions;
-     IsInteractive=false;
-     LightSyntax= Some true;
-     CompilingFsLib= false;
-     IsExe=false} 
+    let mapErrors =
+        Array.map ^ fun (x: FSharpDiagnostic) ->
+            match x.Severity with
+            | FSharpDiagnosticSeverity.Error -> VRage.Scripting.Message(true, x.Message)
+            | _ -> VRage.Scripting.Message(false, x.Message)
+        >> ResizeArray
 
-let rec isModeEnabled (block: MyProgrammableBlock ): bool = 
-    if block.Storage <> null then
+     
+        
+    let hasNamespace (str: String) =
+        str.TrimStart().StartsWith("namespace FSharpSupport")
+            
+    let compile assemblyName script : Result<VRage.Scripting.Message List * Assembly, VRage.Scripting.Message List> Async  =
+        async {
+            let checker = FSharpChecker.Create()
+            let! res = checker.ParseFile(fn, SourceText.ofString script, config fn)
+            if not ^ hasNamespace script then
+                return Error (ResizeArray([VRage.Scripting.Message(true, noNamespace)]))
+            else if not res.ParseHadErrors then
+                let! errors, _, asm = checker.CompileToDynamicAssembly([res.ParseTree], assemblyName, dependencies, None, noframework = false)
+                match asm with
+                | Some asm -> return Ok(mapErrors errors, asm)
+                | None -> return Error(mapErrors errors)
+            else return Error (mapErrors res.Diagnostics)
+        }
+        
+let joinErrors (errors: VRage.Scripting.Message seq) =
+        errors
+        |> Seq.map (fun x -> x.Text)
+        |> fun x -> x.Join(delimiter=";")
+        
+let isModeEnabled (block: MyProgrammableBlock ): bool =
+        if block.Storage = null then
+            block.Storage <- MyModStorageComponent()
         match block.Storage.TryGetValue(fsharpModeGUID) with
         | true, v -> v = bool.TrueString
         | false, _ -> block.Storage.Add(fsharpModeGUID, bool.FalseString); false
-    else false
-
-let mapErrors =
-    Array.map <| fun (x: FSharpErrorInfo) ->
-        match x.Severity with
-        | FSharpErrorSeverity.Warning -> VRage.Scripting.Message(false, x.Message)
-        | FSharpErrorSeverity.Error -> VRage.Scripting.Message(true, x.Message)
-    >> ResizeArray
-
-let compile assemblyName script : Result<VRage.Scripting.Message List * Assembly, VRage.Scripting.Message List> Async  =
-    async {
-          let checker = FSharpChecker.Create()
-          let! res = checker.ParseFile(fn, SourceText.ofString script, config fn)
-          match res.ParseTree with
-          | Some tree -> 
-              let! (errors, _, asm) =
-                   checker.CompileToDynamicAssembly([tree], assemblyName, dependencies, None, noframework=false)
-              match asm with
-              | Some asm -> return Ok (mapErrors errors, asm)
-              | None -> return Error (mapErrors errors)
-          | None -> return Error (mapErrors res.Errors)
-      }
 
 [<HarmonyPatch(typeof<MyProgrammableBlock>, "Compile")>]
 type CompilePatch =
     static member isModeEnabledStub(block: MyProgrammableBlock): bool = isModeEnabled block
-
     static member CompileFSharp
         (_ : VRage.Scripting.IVRageScripting,
          assemblyName: string,
@@ -96,17 +121,19 @@ type CompilePatch =
          _ : String,
          _ : String,
          _ : String) : Assembly =
-        let result = compile assemblyName program |> Async.RunSynchronously
+        let result = Compilation.compile assemblyName program |> Async.RunSynchronously
         match result with
-        | Error list -> diagnostics <- list; null
-        | Ok (list, asm ) -> diagnostics <- list; asm
-
+        | Error list ->
+            //diagnostics <- list; log ^ "compilation FAILED! "; Seq.iter log list; null
+            raise(Exception(joinErrors list))
+        | Ok (list, asm ) ->
+            diagnostics <- list; log ^ "compilation SUCCESS! " + program; asm
     (*
         This code emits if statement to replace C# compilng task to F# compile function
     *)
     [<HarmonyTranspiler>]
-    static member Transpile(instuctions: CodeInstruction seq, ilgenerator: ILGenerator): CodeInstruction seq = 
-        seq{
+    static member Transpile(instructions: CodeInstruction seq, ilgenerator: ILGenerator): CodeInstruction seq = 
+        seq{ 
             let jumpLabel = ilgenerator.DefineLabel()
             let jump2Label = ilgenerator.DefineLabel()
             let isModeEnableInfo = typeof<CompilePatch>.GetMethod "isModeEnabledStub"
@@ -117,20 +144,28 @@ type CompilePatch =
             CodeInstruction(OpCodes.Ldarg_0) 
             CodeInstruction(OpCodes.Call, isModeEnableInfo)  
             CodeInstruction(OpCodes.Stloc, isFsharpEnabledIndex)  
-            for instuction in instuctions do
-                if instuction.Calls compileInGameScriptAsyncInfo then
+            for instruction in instructions do
+                if instruction.Calls compileInGameScriptAsyncInfo then
                      CodeInstruction(OpCodes.Ldloc, isFsharpEnabledIndex) 
                      CodeInstruction(OpCodes.Brtrue, jumpLabel) 
-                     instuction  
-                elif instuction.opcode = OpCodes.Stfld && instuction.operand = (mAssemblyInfo :> obj) then 
+                     instruction  
+                elif instruction.opcode = OpCodes.Stfld && instruction.operand = (mAssemblyInfo :> obj) then 
                      CodeInstruction(OpCodes.Br, jump2Label)  
                      CodeInstruction(OpCodes.Call, compileFSharpInfo) .WithLabels jumpLabel 
-                     instuction.WithLabels jump2Label 
-                else instuction 
+                     instruction.WithLabels jump2Label 
+                else instruction
         }
+    static member Postfix(__instance: MyProgrammableBlock) =
+        let asm = AccessTools.Field(typeof<MyProgrammableBlock>,"m_assembly")
+        let errors = AccessTools.Field(typeof<MyProgrammableBlock>, "m_compilerErrors")
+        log "Compilation has passed"
+        log ^ "Assembly is " + string (asm.GetValue(__instance))
+        log ^ "Compiler errors is: "
+        errors.GetValue __instance :?> _ seq |> Seq.iter log
+        
 
 [<HarmonyPatch(typeof<MyProgrammableBlock>, "CreateInstance")>]
-type CreateInstancePatch =
+type CreateInstancePatch =   
     [<HarmonyTranspiler>]
     static member Transpile(instructions: CodeInstruction seq, ilgenerator: ILGenerator) : CodeInstruction seq = 
         seq {
@@ -155,7 +190,12 @@ type CheckboxSetter = ``MyTerminalValueControl`2``.SetterDelegate<MyProgrammable
 [<HarmonyPatch(typeof<MyProgrammableBlock>, "CreateTerminalControls")>]
 type CreateTerminalControlsPatch =
     [<HarmonyPostfix>]
-    static member Postfix() = 
+    static member Postfix() =
+        let onCheckboxClick (block: MyProgrammableBlock) (v: bool) =
+            if block.Storage <> null then
+                match block.Storage.TryGetValue(fsharpModeGUID) with
+                | true, _ -> block.Storage.SetValue(fsharpModeGUID, v.ToString())
+                | false, _ -> block.Storage.Add(fsharpModeGUID, v.ToString())
         let array = ResizeArray()
         MyTerminalControlFactory.GetControls(typeof<MyProgrammableBlock>, array)
         match array |> Seq.tryFind(fun x -> x.Id = "F# mode") with
@@ -164,10 +204,6 @@ type CreateTerminalControlsPatch =
             let checkbox = MyTerminalControlCheckbox("F# mode", MySpaceTexts.Align_Left, MySpaceTexts.Blank)
             checkbox.Getter <- CheckboxGetter isModeEnabled
             checkbox.Enabled <- Func<MyProgrammableBlock, bool> (fun _ -> true)
-            checkbox.Setter <- CheckboxSetter (fun (block) v ->
-                    if block.Storage <> null then
-                        match block.Storage.TryGetValue(fsharpModeGUID) with
-                        | true, _ -> block.Storage.SetValue(fsharpModeGUID, v.ToString())
-                        | false, _ -> block.Storage.Add(fsharpModeGUID, v.ToString()))
+            checkbox.Setter <- CheckboxSetter onCheckboxClick                        
             MyTerminalControlFactory.AddControl<MyProgrammableBlock>(0, checkbox)
         
